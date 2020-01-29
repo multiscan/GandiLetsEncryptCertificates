@@ -46,6 +46,7 @@ DRY="--dry-run"
 DOMAINS=""
 while [ $# -gt 0 ] ; do
 case $1 in
+-h) usage; exit; ;;
 -y) DRY=""
     shift 1
     ;;
@@ -132,22 +133,19 @@ fi
 # All this copying back and forth is due to the fact that 
 # docker cannot mount keybase fs but also as a backup
 tmp=$(mktemp -d /tmp/certbot_XXXXXX)
-rsync -av $ARCHIVE/ $tmp/
-trap "echo rm -rf $tmp" EXIT
+rsync -a $ARCHIVE/ $tmp/
+trap "rm -rf $tmp" EXIT
 
-for dom in $DOMAINS ; do 
-  docker run -it --rm \
-           -v "$tmp/etc:/etc/letsencrypt" \
-           -v "$tmp/log:/var/log/letsencrypt" \
-           -v "$tmp/gandi.ini:/tmp/gandi.ini" \
-           multiscan/certbot renew \
-           $DRY \
-           --text \
-           --non-interactive \
-           --agree-tos --email $MYEMAIL \
-           -a certbot-plugin-gandi:dns --certbot-plugin-gandi:dns-credentials /tmp/gandi.ini \
-           -d \*.$dom
-  if [ -z "$DRY" ] ; then
-    rsync -av $tmp/ $ARCHIVE/
-  fi
-done
+docker run -it --rm \
+         -v "$tmp/etc:/etc/letsencrypt" \
+         -v "$tmp/log:/var/log/letsencrypt" \
+         -v "$tmp/gandi.ini:/tmp/gandi.ini" \
+         multiscan/certbot renew \
+         $DRY \
+         --text \
+         --non-interactive \
+         --agree-tos --email $MYEMAIL \
+         -a certbot-plugin-gandi:dns --certbot-plugin-gandi:dns-credentials /tmp/gandi.ini
+if [ -z "$DRY" ] ; then
+  rsync -a $tmp/ $ARCHIVE/
+fi

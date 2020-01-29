@@ -45,6 +45,7 @@ DRY="--dry-run"
 DOMAINS=""
 while [ $# -gt 0 ] ; do
 case $1 in
+-h) usage; exit; ;;
 -y) DRY=""
     shift 1
     ;;
@@ -137,8 +138,8 @@ fi
 # All this copying back and forth is due to the fact that 
 # docker cannot mount keybase fs but also as a backup
 tmp=$(mktemp -d /tmp/certbot_XXXXXX)
-rsync -av $ARCHIVE/ $tmp/
-trap "echo rm -rf $tmp" EXIT
+rsync -a $ARCHIVE/ $tmp/
+trap "rm -rf $tmp" EXIT
 
 for dom in $DOMAINS ; do 
   docker run -it --rm \
@@ -156,6 +157,6 @@ for dom in $DOMAINS ; do
            # --force-renewal --reinstall \
            # --standalone \
   if [ -z "$DRY" ] ; then
-    rsync -av $tmp/ $ARCHIVE/
+    rsync -a $tmp/ $ARCHIVE/
   fi
 done

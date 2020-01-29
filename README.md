@@ -18,7 +18,10 @@ To generate your brand new certificates first test that everything is okay:
 ```
 then run it again adding a `-y` option.
 
-Your certificates will be located in a folder named `etc/live/` in your archive directory
+Your certificates will be located in a folder named `etc/live/` in your archive directory.
+For [traefik](https://github.com/multiscan/dev_traefik), the two files that are needed are
+ * `privkey.pem`
+ * `fullchain.pem` 
 
 ## Renew
 Similarly, you can renew certs that are about to expire with `./cbot_gandi_renew.sh`:
