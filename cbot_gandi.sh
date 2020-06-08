@@ -4,9 +4,10 @@ set -e
 
 MYEMAIL="giovanni.cangiani@gmail.com"
 ARCHIVE="certbot"
+DKIMAGE="multiscan/certbot"
 
 # NOTE: that this will only work from controlled IPs due to Gandi security
-# docker run -it --entrypoint /bin/sh multiscan/certbot
+# docker run -it --entrypoint /bin/sh $DKIMAGE
 # https://github.com/obynio/certbot-plugin-gandi
 # https://pypi.org/project/certbot-plugin-gandi/
 # https://letsencrypt.org/getting-started/
@@ -21,9 +22,12 @@ ARCHIVE="certbot"
 
 usage() {
   cat <<-__EOF
-    This script will renew all the let's encrypt * certificates 
-    in your archive directory. 
-    The domains are supposed to be registered on gandi.net. 
+    This script will either 
+      create let's encrypt * certificates for the provided 
+      domain names that are supposed to be registered on gandi.net. 
+    or
+      attempt to renew all certificates that are already in the archive
+
     The script expects to find in the archive directory a 'gandi.ini' file 
     containing the following line:
       certbot_plugin_gandi:dns_api_key=YOUR_GANDI_DNS_API_KEY
@@ -31,7 +35,7 @@ usage() {
     https://docs.gandi.net/en/domain_names/advanced_users/api.html
 
     usage:
-      $0 [-y] [-e EMAIL] [-a DIR]
+      $0 [-y] [-e EMAIL] [-a DIR] [domain_name] [domain_name] ... [domain_name]
     options:
       -y       : Disable dry-run and actually do the job.
       -e EMAIL : Set e-mail address to be used by certbot (default: $MYEMAIL)
@@ -62,11 +66,11 @@ case $1 in
 esac
 done 
 
-if [[ "$1" =~ ^/|^./ ]] ; then
+if [ -d "$ARCHIVE" ] ; then
   # archive dir is a standard directory not in keybase
   echo "Archive directory is a standard one: $ARCHIVE"
 else
-  # archive dir is in keybase
+  # we assume it is relative to the user's private directory under keybase
   which -s keybase || {
     echo "keybase not found"
     exit 1
@@ -107,27 +111,46 @@ fi
   exit 1
 }
 
+if ! docker image ls | grep -q $DKIMAGE  ; then
+  echo "Building docker image"
+  docker build -t $DKIMAGE certbot-gandi
+fi
+
+if [ -z "$DOMAINS" ] ; then
+  [ -d $ARCHIVE/etc/live ] || {
+    echo "No $ARCHIVE/etc/live found! Please check your archive path"
+    echo "or provide domain names to create new ones"
+    exit 1
+  }
+  MODE="renew"
+  echo "No domains given. Assuming you want to (try to) renew existing certs."
+  DOMAINS=$(ls -1 $ARCHIVE/etc/live | grep -v README)
+  if [ -z "$DOMAINS" ] ; then 
+    echo "No certs found!"
+    exit 1
+  fi
+  echo "Domains that will be renewed:"
+else
+  MODE="create"
+  echo "This will create certificates for the following domain(s):"
+fi
+for dom in $DOMAINS ; do 
+  echo "  *.$dom"
+done
+
 if [ "$DRY" == "--dry-run" ] ; then
   echo "Running in dry-run mode to test certbot. Restart with -y to actually do the job."
 else
-  echo "This is the real run. We will create the following certificates:"
-  for dom in $DOMAINS ; do 
-    echo "  *.$dom"
-  done
-
-  read -p "Are you sure that you want proceed ? " -n 1 -r
-  echo
-  if [[ $REPLY =~ ^[Yy]$ ]] ; then
-    echo "Ok let's proceed"
-  else
-    echo "Ok. See you next time then."
-    exit
-  fi
+  echo "This is the real run and will create/renew certificates"
 fi
 
-if ! docker image ls | grep -q multiscan/certbot  ; then
-  echo "Building docker image"
-  docker build -t multiscan/certbot certbot-gandi
+read -p "Are you sure that you want proceed ? " -n 1 -r
+echo
+if [[ $REPLY =~ ^[Yy]$ ]] ; then
+  echo "Ok let's proceed"
+else
+  echo "Ok. See you next time then."
+  exit
 fi
 
 # All this copying back and forth is due to the fact that 
@@ -136,16 +159,40 @@ tmp=$(mktemp -d /tmp/certbot_XXXXXX)
 rsync -a $ARCHIVE/ $tmp/
 trap "rm -rf $tmp" EXIT
 
-docker run -it --rm \
-         -v "$tmp/etc:/etc/letsencrypt" \
-         -v "$tmp/log:/var/log/letsencrypt" \
-         -v "$tmp/gandi.ini:/tmp/gandi.ini" \
-         multiscan/certbot renew \
-         $DRY \
-         --text \
-         --non-interactive \
-         --agree-tos --email $MYEMAIL \
-         -a certbot-plugin-gandi:dns --certbot-plugin-gandi:dns-credentials /tmp/gandi.ini
-if [ -z "$DRY" ] ; then
-  rsync -a $tmp/ $ARCHIVE/
+if [ "$MODE" == "create" ] ; then
+  for dom in $DOMAINS ; do 
+    docker run  -it --rm \
+                -v "$tmp/etc:/etc/letsencrypt" \
+                -v "$tmp/log:/var/log/letsencrypt" \
+                -v "$tmp/gandi.ini:/tmp/gandi.ini" \
+                $DKIMAGE certonly \
+                $DRY \
+                --text \
+                --non-interactive \
+                --agree-tos --email $MYEMAIL \
+                -a certbot-plugin-gandi:dns \
+                --certbot-plugin-gandi:dns-credentials /tmp/gandi.ini \
+                -d \*.$dom
+                # --rsa-key-size 4096
+                # --force-renewal --reinstall
+                # --standalone
+    if [ -z "$DRY" ] ; then
+      rsync -a $tmp/ $ARCHIVE/
+    fi
+  done
+else
+  docker run  -it --rm \
+              -v "$tmp/etc:/etc/letsencrypt" \
+              -v "$tmp/log:/var/log/letsencrypt" \
+              -v "$tmp/gandi.ini:/tmp/gandi.ini" \
+              $DKIMAGE renew \
+              $DRY \
+              --text \
+              --non-interactive \
+              --agree-tos --email $MYEMAIL \
+              -a certbot-plugin-gandi:dns \
+              --certbot-plugin-gandi:dns-credentials /tmp/gandi.ini
+  if [ -z "$DRY" ] ; then
+    rsync -a $tmp/ $ARCHIVE/
+  fi
 fi
